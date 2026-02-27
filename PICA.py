@@ -3,7 +3,6 @@ from discord.ext import commands
 from discord import app_commands
 import json
 import os
-import hashlib
 
 # ================= CONFIG =================
 TOKEN = os.getenv("TOKEN") or "InsertToken"
@@ -17,9 +16,6 @@ intents.guilds = True
 intents.message_content = True 
 intents.reactions = True
 intents.members = True 
-
-bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
 
 # ================= DATA SYSTEM =================
 def load_data():
@@ -54,11 +50,53 @@ def is_admin_or_privileged(interaction: discord.Interaction):
         if role in interaction.user.roles: return True
     return False
 
-# ================= CAROUSEL VIEW =================
+# ================= MODAL BALASAN =================
+class ReplyModal(discord.ui.Modal, title='Confess'):
+    reply_content = discord.ui.TextInput(
+        label='Isi Komentar',
+        style=discord.TextStyle.paragraph,
+        placeholder='Ketik komentarmu di sini...',
+        required=True,
+        max_length=1000
+    )
+
+    def __init__(self, original_message: discord.Message):
+        super().__init__()
+        self.original_message = original_message
+
+    async def on_submit(self, interaction: discord.Interaction):
+        thread = self.original_message.thread
+        
+        if not thread:
+            thread = await self.original_message.create_thread(
+                name="Komentar",
+                auto_archive_duration=1440 
+            )
+
+        await thread.send(f"**Komentar baru:**\n{self.reply_content.value}")
+        await interaction.response.send_message("✅ Komentarmu berhasil dikirim!", ephemeral=True)
+
+# ================= PERSISTENT VIEWS =================
+class PersistentConfessionView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None) # timeout=None wajib agar tidak expired
+
+    @discord.ui.button(label="Komentar", style=discord.ButtonStyle.secondary, custom_id="persist_reply_btn")
+    async def reply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ReplyModal(interaction.message))
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, custom_id="persist_delete_btn")
+    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not is_admin_or_privileged(interaction):
+            await interaction.response.send_message("Hanya Admin/Staff yang bisa menghapus.", ephemeral=True)
+            return
+        try: await interaction.message.delete()
+        except: pass
+
 class PicafessView(discord.ui.View):
-    def __init__(self, images, current_index=0):
+    def __init__(self, images=None, current_index=0):
         super().__init__(timeout=None)
-        self.images = images
+        self.images = images or []
         self.index = current_index
 
     def update_buttons(self):
@@ -68,6 +106,9 @@ class PicafessView(discord.ui.View):
 
     @discord.ui.button(label="◀", style=discord.ButtonStyle.gray, custom_id="prev_img")
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.images:
+            await interaction.response.send_message("Sistem restart. Gambar tidak bisa digeser lagi.", ephemeral=True)
+            return
         self.index -= 1
         self.update_buttons()
         embed = interaction.message.embeds[0]
@@ -80,11 +121,18 @@ class PicafessView(discord.ui.View):
 
     @discord.ui.button(label="▶", style=discord.ButtonStyle.gray, custom_id="next_img")
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.images:
+            await interaction.response.send_message("Sistem restart. Gambar tidak bisa digeser lagi.", ephemeral=True)
+            return
         self.index += 1
         self.update_buttons()
         embed = interaction.message.embeds[0]
         embed.set_image(url=self.images[self.index])
         await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Komentar", style=discord.ButtonStyle.secondary, custom_id="reply_img_btn")
+    async def reply_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ReplyModal(interaction.message))
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, custom_id="persistent_delete_confess")
     async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -93,6 +141,20 @@ class PicafessView(discord.ui.View):
             return
         try: await interaction.message.delete()
         except: pass
+
+# ================= BOT CLASS =================
+class PicaBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix="!", intents=intents)
+    
+    async def setup_hook(self):
+        # Mendaftarkan view ke memori agar persistent setelah restart
+        self.add_view(PersistentConfessionView())
+        self.add_view(PicafessView())
+        await self.tree.sync()
+
+bot = PicaBot()
+tree = bot.tree
 
 # ================= CORE LOGIC =================
 async def send_confession(guild, user, message, attachments=None):
@@ -116,21 +178,9 @@ async def send_confession(guild, user, message, attachments=None):
             view = PicafessView(img_urls)
             view.update_buttons()
         else:
-            view = discord.ui.View(timeout=None)
-            delete_btn = discord.ui.Button(label="Delete", style=discord.ButtonStyle.danger, custom_id="p_del")
-            async def d_cb(it):
-                if is_admin_or_privileged(it): await it.message.delete()
-                else: await it.response.send_message("No Perms.", ephemeral=True)
-            delete_btn.callback = d_cb
-            view.add_item(delete_btn)
+            view = PersistentConfessionView()
     else:
-        view = discord.ui.View(timeout=None)
-        delete_btn = discord.ui.Button(label="Delete", style=discord.ButtonStyle.danger, custom_id="p_del")
-        async def d_cb(it):
-            if is_admin_or_privileged(it): await it.message.delete()
-            else: await it.response.send_message("No Perms.", ephemeral=True)
-        delete_btn.callback = d_cb
-        view.add_item(delete_btn)
+        view = PersistentConfessionView()
 
     msg = await channel.send(embed=embed, view=view)
     config["confessions"][str(msg.id)] = {"number": conf_num, "hearts": 0}
@@ -177,7 +227,6 @@ async def on_message(message):
 
 @bot.event
 async def on_ready():
-    await tree.sync()
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="/picafess"))
     print(f"Bot Online: {bot.user}")
 

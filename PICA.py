@@ -51,11 +51,11 @@ def is_admin_or_privileged(interaction: discord.Interaction):
     return False
 
 # ================= MODALS =================
-class ReplyModal(discord.ui.Modal, title='Reply'):
+class ReplyModal(discord.ui.Modal, title='Komentar'):
     reply_content = discord.ui.TextInput(
-        label='Reply...',
+        label='Isi Komentar',
         style=discord.TextStyle.paragraph,
-        placeholder='Ketik Reply di sini...',
+        placeholder='Ketik komentarmu di sini...',
         required=True,
         max_length=1000
     )
@@ -66,14 +66,23 @@ class ReplyModal(discord.ui.Modal, title='Reply'):
 
     async def on_submit(self, interaction: discord.Interaction):
         thread = self.original_message.thread
+        
+        # Buat thread jika belum ada
         if not thread:
             thread = await self.original_message.create_thread(
                 name="Komentar",
                 auto_archive_duration=1440 
             )
 
-        await thread.send(f"**Komentar baru:**\n{self.reply_content.value}")
-        await interaction.response.send_message("✅ Komentarmu berhasil dikirim!", ephemeral=True)
+        # Membungkus teks balasan ke dalam Embed abu-abu polos 
+        # murni tanpa nama pengirim atau ID agar sepenuhnya rahasia
+        embed = discord.Embed(description=self.reply_content.value, color=discord.Color.light_gray())
+        embed.set_author(name="Komentar Anonim", icon_url="https://cdn.discordapp.com/embed/avatars/0.png")
+
+        await thread.send(embed=embed)
+        
+        # Konfirmasi ke pengguna secara pribadi
+        await interaction.response.send_message("✅ Komentarmu berhasil dikirim ke thread secara anonim!", ephemeral=True)
 
 class SendConfessModal(discord.ui.Modal, title='Kirim Confess'):
     confess_content = discord.ui.TextInput(

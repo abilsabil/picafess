@@ -7,6 +7,7 @@ import os
 # ================= CONFIG =================
 TOKEN = os.getenv("TOKEN") or "InsertToken"
 DATA_FILE = "confession_data.json"
+DEV_LOG_CHANNEL_ID = 1054292813996638258 
 DEFAULT_COLOR = 0xff69b4 
 # ==========================================
 
@@ -72,16 +73,16 @@ class RiddleAnswerModal(discord.ui.Modal, title='Jawab Riddle'):
         user_answer = self.answer_input.value.lower().strip()
         
         if user_answer == self.correct_answer:
-            # Bot langsung memberitahu di channel bahwa user ini benar
-            await interaction.channel.send(f"🎉 {interaction.user.mention} menjawab dengan **BENAR**! Tunggu konfirmasi Admin untuk pemenangnya.")
-            await interaction.response.send_message("✅ Jawabanmu benar! Kamu sudah disebut di channel.", ephemeral=True)
+            await interaction.channel.send(f"🎉 {interaction.user.mention} menjawab dengan **BENAR**! Tunggu konfirmasi pembuat riddle.")
+            await interaction.response.send_message("✅ Jawabanmu benar!", ephemeral=True)
         else:
-            await interaction.response.send_message("❌ Jawaban salah! Coba lagi ya.", ephemeral=True)
+            await interaction.response.send_message("❌ Jawaban salah!", ephemeral=True)
 
 class RiddleView(discord.ui.View):
-    def __init__(self, correct_answer: str = ""):
+    def __init__(self, correct_answer: str = "", creator_id: int = None):
         super().__init__(timeout=None)
         self.correct_answer = correct_answer
+        self.creator_id = creator_id
 
     @discord.ui.button(label="Jawab", style=discord.ButtonStyle.success, custom_id="riddle_answer_btn")
     async def answer_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -89,18 +90,18 @@ class RiddleView(discord.ui.View):
 
     @discord.ui.button(label="Umumkan Pemenang", style=discord.ButtonStyle.danger, custom_id="riddle_announce_btn")
     async def announce_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not is_admin_or_privileged(interaction):
-            await interaction.response.send_message("Hanya Admin yang bisa mengumumkan pemenang.", ephemeral=True)
+        # Hanya pembuat riddle ATAU Admin yang bisa mengumumkan pemenang
+        if interaction.user.id != self.creator_id and not is_admin_or_privileged(interaction):
+            await interaction.response.send_message("Hanya pembuat riddle ini atau Admin yang bisa menutupnya.", ephemeral=True)
             return
         
         modal = discord.ui.Modal(title="Set Pemenang")
-        winner_input = discord.ui.TextInput(label="Nama Pemenang", placeholder="Contoh: @User", required=True)
+        winner_input = discord.ui.TextInput(label="Nama Pemenang", placeholder="@User", required=True)
         
         async def modal_submit(itx: discord.Interaction):
             embed = itx.message.embeds[0]
-            embed.add_field(name="🎊 PEMENANG RESMI", value=f"Selamat kepada {winner_input.value}!", inline=False)
+            embed.add_field(name="🎊 PEMENANG", value=f"Selamat kepada {winner_input.value}!", inline=False)
             embed.color = discord.Color.gold()
-            # Hapus tombol setelah diumumkan
             await itx.response.edit_message(embed=embed, view=None)
 
         modal.on_submit = modal_submit
@@ -118,13 +119,13 @@ class ReplyModal(discord.ui.Modal, title='Komentar'):
         embed = discord.Embed(description=self.reply_content.value, color=discord.Color.light_gray())
         embed.set_author(name="Komentar Anonim", icon_url="https://cdn.discordapp.com/embed/avatars/0.png")
         await thread.send(embed=embed)
-        await interaction.response.send_message("✅ Komentarmu terkirim!", ephemeral=True)
+        await interaction.response.send_message("✅ Terkirim!", ephemeral=True)
 
 class SendConfessModal(discord.ui.Modal, title='Kirim Confess'):
     confess_content = discord.ui.TextInput(label='Isi Confess', style=discord.TextStyle.paragraph, required=True, max_length=2000)
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        success, note = await send_confession(interaction.guild, interaction.user, self.confess_content.value, None)
+        success, note = await send_confession(interaction.guild, interaction.user, self.confess_content.value)
         await interaction.followup.send(note, ephemeral=True)
 
 class PersistentConfessionView(discord.ui.View):
@@ -136,6 +137,7 @@ class PersistentConfessionView(discord.ui.View):
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, custom_id="pd_btn")
     async def d_btn(self, itx, btn):
         if is_admin_or_privileged(itx): await itx.message.delete()
+        else: await itx.response.send_message("Hanya Admin yang bisa menghapus.", ephemeral=True)
 
 # ================= BOT CORE =================
 class PicaBot(commands.Bot):
@@ -146,15 +148,17 @@ class PicaBot(commands.Bot):
 
 bot = PicaBot(); tree = bot.tree
 
-async def send_confession(guild, user, message, attachments=None):
+async def send_confession(guild, user, message):
     config = get_server_config(guild.id)
-    chan_id = config.get("confess_channel_id")
-    channel = bot.get_channel(chan_id)
+    channel = bot.get_channel(config.get("confess_channel_id"))
     if not channel: return False, "Channel Confess belum diatur!"
     config["count"] += 1
     embed = discord.Embed(title=f"💌 PICAFESS #{config['count']}", description=message, color=DEFAULT_COLOR)
-    msg = await channel.send(embed=embed, view=PersistentConfessionView())
+    await channel.send(embed=embed, view=PersistentConfessionView())
     save_data(server_data)
+    
+    dev_log = bot.get_channel(DEV_LOG_CHANNEL_ID)
+    if dev_log: await dev_log.send(f"🚀 **Confess** | {user}: {message}")
     return True, "Terkirim!"
 
 # ================= COMMANDS =================
@@ -172,28 +176,31 @@ async def sr(itx: discord.Interaction, channel: discord.TextChannel):
     save_data(server_data)
     await itx.response.send_message(f"✅ Channel Riddle: {channel.mention}", ephemeral=True)
 
-@tree.command(name="reset-all-channels", description="Admin: Reset semua pengaturan channel")
+@tree.command(name="reset-all-channels")
 async def reset_all(itx: discord.Interaction):
     if not is_admin_or_privileged(itx): return
     config = get_server_config(itx.guild_id)
     config["confess_channel_id"] = None
     config["riddle_channel_id"] = None
     save_data(server_data)
-    await itx.response.send_message("🗑️ Semua pengaturan channel telah dihapus.", ephemeral=True)
+    await itx.response.send_message("🗑️ Semua channel direset.", ephemeral=True)
 
-@tree.command(name="riddle-setup")
-@app_commands.describe(pertanyaan="Isi teka-teki", jawaban="Jawaban benar")
+@tree.command(name="riddle-setup", description="Semua orang bisa membuat riddle!")
 async def rs(itx: discord.Interaction, pertanyaan: str, jawaban: str):
-    if not is_admin_or_privileged(itx): return
     config = get_server_config(itx.guild_id)
     chan = bot.get_channel(config.get("riddle_channel_id"))
+    
     if not chan: 
-        await itx.response.send_message("❌ Set channel riddle dulu!", ephemeral=True)
-        return
+        return await itx.response.send_message("❌ Channel Riddle belum diatur oleh Admin!", ephemeral=True)
+    
     await itx.response.send_message("Membuat riddle...", ephemeral=True)
     await itx.delete_original_response()
+    
     embed = discord.Embed(title="🧩 PICA RIDDLE", description=f"**Pertanyaan:**\n{pertanyaan}", color=0x2ecc71)
-    await chan.send(embed=embed, view=RiddleView(jawaban))
+    embed.set_author(name=f"Oleh: {itx.user.display_name}", icon_url=itx.user.display_avatar.url)
+    
+    # Masukkan user ID pembuat ke View agar hanya dia (atau admin) yang bisa tutup riddle
+    await chan.send(embed=embed, view=RiddleView(jawaban, itx.user.id))
 
 @tree.command(name="picafess")
 async def pf(itx: discord.Interaction, message: str):

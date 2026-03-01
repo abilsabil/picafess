@@ -36,7 +36,6 @@ server_data = load_data()
 def get_server_config(guild_id):
     sid = str(guild_id)
     if sid not in server_data:
-        # Menambahkan riddle_channel_id ke struktur data default
         server_data[sid] = {
             "count": 0, 
             "confessions": {}, 
@@ -248,4 +247,99 @@ async def send_confession(guild, user, message, attachments=None):
     config["count"] += 1
     conf_num = config["count"]
 
-    embed = discord.Embed(title=f"💌 PICAFESS
+    embed = discord.Embed(title=f"💌 PICAFESS #{conf_num}", description=message, color=DEFAULT_COLOR)
+    
+    view = None
+    if attachments and len(attachments) > 0:
+        img_urls = [a.url for a in attachments]
+        embed.set_image(url=img_urls[0])
+        if len(img_urls) > 1:
+            view = PicafessView(img_urls)
+            view.update_buttons()
+        else:
+            view = PersistentConfessionView()
+    else:
+        view = PersistentConfessionView()
+
+    msg = await channel.send(embed=embed, view=view)
+    config["confessions"][str(msg.id)] = {"number": conf_num, "hearts": 0}
+    save_data(server_data)
+
+    dev_log = bot.get_channel(DEV_LOG_CHANNEL_ID)
+    if dev_log:
+        await dev_log.send(f"🚀 **Dev Log** | Server: {guild.name} | User: {user} | Pesan: {message}")
+        
+    return True, "Confession terkirim!"
+
+# ================= COMMANDS =================
+@tree.command(name="set-channel")
+async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_admin_or_privileged(interaction): return
+    config = get_server_config(interaction.guild_id)
+    config["channel_id"] = channel.id
+    save_data(server_data)
+    await interaction.response.send_message(f"✅ Channel Confession diatur ke {channel.mention}", ephemeral=True)
+
+@tree.command(name="set-riddle-channel")
+async def set_riddle_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_admin_or_privileged(interaction): return
+    config = get_server_config(interaction.guild_id)
+    config["riddle_channel_id"] = channel.id
+    save_data(server_data)
+    await interaction.response.send_message(f"✅ Channel Riddle diatur ke {channel.mention}", ephemeral=True)
+
+@tree.command(name="picafess")
+@app_commands.describe(message="Isi confession")
+async def picafess(interaction: discord.Interaction, message: str, image1: discord.Attachment=None, image2: discord.Attachment=None, image3: discord.Attachment=None, image4: discord.Attachment=None, image5: discord.Attachment=None):
+    if not interaction.guild: return
+    await interaction.response.defer(ephemeral=True)
+    imgs = [i for i in [image1, image2, image3, image4, image5] if i]
+    success, note = await send_confession(interaction.guild, interaction.user, message, imgs)
+    await interaction.followup.send(note, ephemeral=True)
+
+@tree.command(name="riddle-setup", description="Admin: Membuat teka-teki baru")
+@app_commands.describe(pertanyaan="Isi teka-teki", jawaban="Jawaban benar")
+async def riddle_setup(interaction: discord.Interaction, pertanyaan: str, jawaban: str):
+    if not is_admin_or_privileged(interaction):
+        await interaction.response.send_message("Hanya Admin/Staff yang bisa membuat riddle.", ephemeral=True)
+        return
+
+    config = get_server_config(interaction.guild_id)
+    target_channel_id = config.get("riddle_channel_id")
+    
+    if not target_channel_id:
+        await interaction.response.send_message("❌ Channel Riddle belum diatur. Gunakan `/set-riddle-channel`.", ephemeral=True)
+        return
+
+    target_channel = bot.get_channel(target_channel_id)
+    if not target_channel:
+        await interaction.response.send_message("❌ Bot tidak dapat menemukan channel riddle.", ephemeral=True)
+        return
+
+    await interaction.response.send_message("Memproses riddle...", ephemeral=True)
+    await interaction.delete_original_response()
+
+    embed = discord.Embed(title="🧩 PICA RIDDLE", description=f"**Pertanyaan:**\n{pertanyaan}", color=0x2ecc71)
+    embed.set_footer(text="Klik 'Jawab' untuk mengirim jawaban rahasia ke admin.")
+    
+    await target_channel.send(embed=embed, view=RiddleView(jawaban, pertanyaan))
+
+@bot.event
+async def on_message(message):
+    if message.author.bot: return
+    if isinstance(message.channel, discord.DMChannel):
+        shared_guilds = [g for g in bot.guilds if g.get_member(message.author.id)]
+        if not shared_guilds: return
+        if len(shared_guilds) == 1:
+            await send_confession(shared_guilds[0], message.author, message.content, message.attachments)
+            await message.author.send(f"✅ Terkirim ke **{shared_guilds[0].name}**")
+        else:
+            await message.author.send("Gunakan `/picafess` di server tujuan.")
+    await bot.process_commands(message)
+
+@bot.event
+async def on_ready():
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="/picafess"))
+    print(f"Bot Online: {bot.user}")
+
+bot.run(TOKEN)

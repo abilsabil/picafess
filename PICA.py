@@ -95,17 +95,21 @@ class RiddleView(discord.ui.View):
             await interaction.response.send_message("Hanya pembuat riddle ini atau Admin yang bisa menutupnya.", ephemeral=True)
             return
         
-        modal = discord.ui.Modal(title="Set Pemenang")
-        winner_input = discord.ui.TextInput(label="Nama Pemenang", placeholder="@User", required=True)
+        modal = discord.ui.Modal(title="Set Pemenang & Jawaban")
+        winner_input = discord.ui.TextInput(label="Nama Pemenang", placeholder="Contoh: @User", required=True)
+        answer_input = discord.ui.TextInput(label="Jawaban Benar", placeholder="Tulis jawaban yang benar di sini...", required=True)
         
         async def modal_submit(itx: discord.Interaction):
             embed = itx.message.embeds[0]
             embed.add_field(name="🎊 PEMENANG", value=f"Selamat kepada {winner_input.value}!", inline=False)
+            embed.add_field(name="💡 JAWABAN", value=f"**{answer_input.value}**", inline=False)
             embed.color = discord.Color.gold()
+            # Hapus tombol setelah diumumkan
             await itx.response.edit_message(embed=embed, view=None)
 
         modal.on_submit = modal_submit
         modal.add_item(winner_input)
+        modal.add_item(answer_input)
         await interaction.response.send_modal(modal)
 
 # ================= CONFESSION SYSTEM =================
@@ -199,7 +203,6 @@ async def rs(itx: discord.Interaction, pertanyaan: str, jawaban: str):
     embed = discord.Embed(title="🧩 PICA RIDDLE", description=f"**Pertanyaan:**\n{pertanyaan}", color=0x2ecc71)
     embed.set_author(name=f"Oleh: {itx.user.display_name}", icon_url=itx.user.display_avatar.url)
     
-    # Masukkan user ID pembuat ke View agar hanya dia (atau admin) yang bisa tutup riddle
     await chan.send(embed=embed, view=RiddleView(jawaban, itx.user.id))
 
 @tree.command(name="picafess")

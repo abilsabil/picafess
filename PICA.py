@@ -39,8 +39,8 @@ def get_server_config(guild_id):
         server_data[sid] = {
             "count": 0, 
             "confessions": {}, 
-            "channel_id": None, 
-            "riddle_channel_id": None, 
+            "confess_channel_id": None, # Field baru
+            "riddle_channel_id": None,  # Field baru
             "admin_role_id": None
         }
         save_data(server_data)
@@ -239,9 +239,9 @@ tree = bot.tree
 # ================= CORE LOGIC =================
 async def send_confession(guild, user, message, attachments=None):
     config = get_server_config(guild.id)
-    if not config.get("channel_id"): return False, "Channel confession belum diatur."
+    if not config.get("confess_channel_id"): return False, "Channel confession belum diatur."
 
-    channel = bot.get_channel(config["channel_id"])
+    channel = bot.get_channel(config["confess_channel_id"])
     if not channel: return False, "Bot tidak bisa mengakses channel confession."
 
     config["count"] += 1
@@ -272,15 +272,26 @@ async def send_confession(guild, user, message, attachments=None):
     return True, "Confession terkirim!"
 
 # ================= COMMANDS =================
-@tree.command(name="set-channel")
-async def set_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+
+# --- SETTINGS CONFESS ---
+@tree.command(name="set-confess-channel", description="Admin: Set channel khusus confession")
+async def set_confess_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     if not is_admin_or_privileged(interaction): return
     config = get_server_config(interaction.guild_id)
-    config["channel_id"] = channel.id
+    config["confess_channel_id"] = channel.id
     save_data(server_data)
     await interaction.response.send_message(f"✅ Channel Confession diatur ke {channel.mention}", ephemeral=True)
 
-@tree.command(name="set-riddle-channel")
+@tree.command(name="reset-confess-channel", description="Admin: Menghapus pengaturan channel confession")
+async def reset_confess_channel(interaction: discord.Interaction):
+    if not is_admin_or_privileged(interaction): return
+    config = get_server_config(interaction.guild_id)
+    config["confess_channel_id"] = None
+    save_data(server_data)
+    await interaction.response.send_message("🗑️ Pengaturan channel Confession telah dihapus.", ephemeral=True)
+
+# --- SETTINGS RIDDLE ---
+@tree.command(name="set-riddle-channel", description="Admin: Set channel khusus riddle")
 async def set_riddle_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     if not is_admin_or_privileged(interaction): return
     config = get_server_config(interaction.guild_id)
@@ -288,6 +299,15 @@ async def set_riddle_channel(interaction: discord.Interaction, channel: discord.
     save_data(server_data)
     await interaction.response.send_message(f"✅ Channel Riddle diatur ke {channel.mention}", ephemeral=True)
 
+@tree.command(name="reset-riddle-channel", description="Admin: Menghapus pengaturan channel riddle")
+async def reset_riddle_channel(interaction: discord.Interaction):
+    if not is_admin_or_privileged(interaction): return
+    config = get_server_config(interaction.guild_id)
+    config["riddle_channel_id"] = None
+    save_data(server_data)
+    await interaction.response.send_message("🗑️ Pengaturan channel Riddle telah dihapus.", ephemeral=True)
+
+# --- FITUR ---
 @tree.command(name="picafess")
 @app_commands.describe(message="Isi confession")
 async def picafess(interaction: discord.Interaction, message: str, image1: discord.Attachment=None, image2: discord.Attachment=None, image3: discord.Attachment=None, image4: discord.Attachment=None, image5: discord.Attachment=None):

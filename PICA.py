@@ -48,8 +48,8 @@ def get_server_config(guild_id):
 
 # ================= UI COMPONENTS =================
 
-# Tombol khusus untuk diklik di Welcome Message
 class ConfessLaunchView(discord.ui.View):
+    """View untuk tombol Kirim Confess di Welcome Message"""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -57,14 +57,14 @@ class ConfessLaunchView(discord.ui.View):
     async def confess_button(self, itx: discord.Interaction, button: discord.ui.Button):
         await itx.response.send_modal(SendConfessModal())
 
-# Modal untuk menulis curhatan
 class SendConfessModal(discord.ui.Modal, title='Unburden Your Mind'):
+    """Modal popup untuk input curhatan"""
     content = discord.ui.TextInput(
         label='Tulis curhatanmu di sini...', 
         style=discord.TextStyle.paragraph, 
         required=True, 
         max_length=2000,
-        placeholder="Apa yang sedang kamu pikirkan?"
+        placeholder="Apa yang mengganjal di pikiranmu?"
     )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -83,29 +83,28 @@ class SendConfessModal(discord.ui.Modal, title='Unburden Your Mind'):
         await chan.send(embed=embed)
         save_data(server_data)
         
-        # Log untuk Developer
         dev_log = bot.get_channel(DEV_LOG_CHANNEL_ID)
         if dev_log: 
             await dev_log.send(f"🚀 **Confess** | {interaction.guild.name} | {interaction.user}: {self.content.value}")
         
-        await interaction.response.send_message("✅ Curhatanmu terkirim secara anonim!", ephemeral=True)
+        await interaction.response.send_message("✅ Curhatan terkirim!", ephemeral=True)
 
-# Fungsi kirim pesan sambutan dengan Tombol
 async def send_welcome_info(guild, config):
+    """Mengirim pesan panduan dengan Tombol Confess"""
     conf_id = config.get("confess_channel_id")
     if conf_id:
         chan = guild.get_channel(conf_id)
         if chan and chan.permissions_for(guild.me).send_messages:
             emb = discord.Embed(
                 title="🌸 Welcome to Unburden!", 
-                description="Tempat untuk melepaskan beban pikiran secara anonim.\n\n"
-                            "1. Klik tombol di bawah untuk **Confess** (Akan muncul #Nomor).\n"
-                            "2. Ketik langsung di channel ini untuk memberi **Komentar** anonim.", 
+                description="Tempat anonim untuk bercerita.\n\n"
+                            "• Klik tombol **Kirim Confess** untuk curhat (Pakai #Nomor).\n"
+                            "• Ketik langsung di sini untuk **Komentar** anonim (Embed saja).", 
                 color=0xff69b4
             )
             await chan.send(embed=emb, view=ConfessLaunchView())
 
-# ================= RIDDLE SYSTEM (Tetap Ada) =================
+# ================= RIDDLE SYSTEM =================
 class RiddleAnswerModal(discord.ui.Modal, title='Kirim Jawaban Riddle'):
     ans = discord.ui.TextInput(label='Jawabanmu', style=discord.TextStyle.paragraph, required=True)
     def __init__(self, original_msg: discord.Message):
@@ -117,7 +116,7 @@ class RiddleAnswerModal(discord.ui.Modal, title='Kirim Jawaban Riddle'):
         emb = discord.Embed(description=self.ans.value, color=discord.Color.blue())
         emb.set_author(name=f"Jawaban dari {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
         await thread.send(embed=emb)
-        await interaction.response.send_message("✅ Terkirim!", ephemeral=True)
+        await interaction.response.send_message("✅ Terkirim ke diskusi!", ephemeral=True)
 
 class RiddleView(discord.ui.View):
     def __init__(self, creator_id: int = 0):
@@ -132,7 +131,7 @@ class RiddleView(discord.ui.View):
 class PicaBot(commands.Bot):
     def __init__(self): super().__init__(command_prefix="!", intents=intents)
     async def setup_hook(self):
-        self.add_view(ConfessLaunchView()) # Daftarkan tombol agar tetap aktif setelah restart
+        self.add_view(ConfessLaunchView()) 
         self.add_view(RiddleView())
         await self.tree.sync()
 
@@ -145,27 +144,20 @@ async def on_message(message):
     config = get_server_config(message.guild.id)
     confess_chan_id = config.get("confess_channel_id")
 
-    # LOGIKA KOMENTAR ANONIM
+    # AUTO-EMBED UNTUK KOMENTAR LANGSUNG
     if message.channel.id == confess_chan_id:
         if not message.content: return
-        
-        # Simpan isi pesan
         content = message.content
-        
-        # Hapus pesan asli user
         try: await message.delete()
         except: pass
 
-        # Kirim ulang sebagai Embed Komentar
         emb = discord.Embed(description=content, color=discord.Color.light_gray())
         emb.set_author(name="Komentar Anonim", icon_url="https://cdn.discordapp.com/embed/avatars/0.png")
-        
         if message.reference:
             emb.set_footer(text="Membalas pesan ↑")
-            
         await message.channel.send(embed=emb)
 
-    # Logika Riddle Thread (Tetap sama)
+    # LOGIKA RIDDLE THREAD
     elif isinstance(message.channel, discord.Thread) and message.channel.name == "Diskusi & Jawaban Riddle":
         content, user = message.content, message.author
         try: await message.delete()
@@ -186,16 +178,34 @@ async def sc(itx, channel: discord.TextChannel):
     await itx.response.send_message(f"✅ Channel Confess diatur ke {channel.mention}", ephemeral=True)
     await send_welcome_info(itx.guild, config)
 
+@tree.command(name="set-riddle-channel")
+async def sr(itx, channel: discord.TextChannel):
+    if not itx.user.guild_permissions.administrator: return
+    config = get_server_config(itx.guild_id)
+    config["riddle_channel_id"] = channel.id
+    save_data(server_data)
+    await itx.response.send_message(f"✅ Channel Riddle diatur ke {channel.mention}", ephemeral=True)
+    await send_welcome_info(itx.guild, config)
+
 @tree.command(name="picafess", description="Kirim curhatan anonim via popup")
 async def pf(itx: discord.Interaction):
     await itx.response.send_modal(SendConfessModal())
+
+@tree.command(name="reset-data", description="Reset counter dan settings server ini")
+async def r_data(itx: discord.Interaction):
+    if not itx.user.guild_permissions.administrator: return
+    sid = str(itx.guild_id)
+    if sid in server_data:
+        server_data[sid] = {"count": 0, "confess_channel_id": None, "riddle_channel_id": None}
+        save_data(server_data)
+        await itx.response.send_message("✅ Data direset. Gunakan `/set-confess-channel` lagi.", ephemeral=True)
 
 @tree.command(name="setup-info")
 async def s_info(itx):
     if not itx.user.guild_permissions.administrator: return
     config = get_server_config(itx.guild_id)
     await send_welcome_info(itx.guild, config)
-    await itx.response.send_message("✅ Pesan selamat datang & tombol dikirim!", ephemeral=True)
+    await itx.response.send_message("✅ Pesan selamat datang terkirim!", ephemeral=True)
 
 @tree.command(name="riddle-setup")
 async def rs(itx, pertanyaan: str):

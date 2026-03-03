@@ -49,83 +49,63 @@ def get_server_config(guild_id):
 # ================= UI COMPONENTS =================
 
 class ConfessLaunchView(discord.ui.View):
-    """View untuk tombol Kirim Confess di Welcome Message"""
     def __init__(self):
         super().__init__(timeout=None)
-
     @discord.ui.button(label="Kirim Confess (Anonim)", style=discord.ButtonStyle.primary, custom_id="persistent_confess_btn")
     async def confess_button(self, itx: discord.Interaction, button: discord.ui.Button):
         await itx.response.send_modal(SendConfessModal())
 
 class SendConfessModal(discord.ui.Modal, title='Unburden Your Mind'):
-    """Modal popup untuk input curhatan"""
-    content = discord.ui.TextInput(
-        label='Tulis curhatanmu di sini...', 
-        style=discord.TextStyle.paragraph, 
-        required=True, 
-        max_length=2000,
-        placeholder="Apa yang mengganjal di pikiranmu?"
-    )
-
+    content = discord.ui.TextInput(label='Tulis curhatanmu...', style=discord.TextStyle.paragraph, required=True, max_length=2000)
     async def on_submit(self, interaction: discord.Interaction):
         config = get_server_config(interaction.guild_id)
         chan = bot.get_channel(config.get("confess_channel_id"))
-        if not chan: 
-            return await interaction.response.send_message("❌ Channel belum diatur!", ephemeral=True)
-        
+        if not chan: return await interaction.response.send_message("❌ Channel belum diatur!", ephemeral=True)
         config["count"] += 1
-        embed = discord.Embed(
-            title=f"💌 PICAFESS #{config['count']}", 
-            description=self.content.value, 
-            color=0xff69b4
-        )
-        
+        embed = discord.Embed(title=f"💌 PICAFESS #{config['count']}", description=self.content.value, color=0xff69b4)
         await chan.send(embed=embed)
         save_data(server_data)
-        
         dev_log = bot.get_channel(DEV_LOG_CHANNEL_ID)
-        if dev_log: 
-            await dev_log.send(f"🚀 **Confess** | {interaction.guild.name} | {interaction.user}: {self.content.value}")
-        
-        await interaction.response.send_message("✅ Curhatan terkirim!", ephemeral=True)
+        if dev_log: await dev_log.send(f"🚀 **Confess** | {interaction.guild.name} | {interaction.user}: {self.content.value}")
+        await interaction.response.send_message("✅ Terkirim!", ephemeral=True)
 
-async def send_welcome_info(guild, config):
-    """Mengirim pesan panduan dengan Tombol Confess"""
-    conf_id = config.get("confess_channel_id")
-    if conf_id:
-        chan = guild.get_channel(conf_id)
-        if chan and chan.permissions_for(guild.me).send_messages:
-            emb = discord.Embed(
-                title="🌸 Welcome to Unburden!", 
-                description="Tempat anonim untuk bercerita.\n\n"
-                            "• Klik tombol **Kirim Confess** untuk curhat (Pakai #Nomor).\n"
-                            "• Ketik langsung di sini untuk **Komentar** anonim (Embed saja).", 
-                color=0xff69b4
-            )
-            await chan.send(embed=emb, view=ConfessLaunchView())
-
-# ================= RIDDLE SYSTEM =================
+# --- Riddle UI ---
 class RiddleAnswerModal(discord.ui.Modal, title='Kirim Jawaban Riddle'):
     ans = discord.ui.TextInput(label='Jawabanmu', style=discord.TextStyle.paragraph, required=True)
     def __init__(self, original_msg: discord.Message):
         super().__init__()
         self.original_msg = original_msg
-
     async def on_submit(self, interaction: discord.Interaction):
         thread = self.original_msg.thread or await self.original_msg.create_thread(name="Diskusi & Jawaban Riddle", auto_archive_duration=1440)
         emb = discord.Embed(description=self.ans.value, color=discord.Color.blue())
         emb.set_author(name=f"Jawaban dari {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
         await thread.send(embed=emb)
-        await interaction.response.send_message("✅ Terkirim ke diskusi!", ephemeral=True)
+        await interaction.response.send_message("✅ Jawaban terkirim ke thread!", ephemeral=True)
 
 class RiddleView(discord.ui.View):
-    def __init__(self, creator_id: int = 0):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.creator_id = creator_id
-
     @discord.ui.button(label="Jawab", style=discord.ButtonStyle.success, custom_id="riddle_ans")
     async def ans_btn(self, itx, btn):
         await itx.response.send_modal(RiddleAnswerModal(itx.message))
+
+async def send_welcome_info(guild, config):
+    """MENGIRIM PESAN WELCOME KE KEDUA CHANNEL"""
+    # Welcome Confess
+    conf_id = config.get("confess_channel_id")
+    if conf_id:
+        chan = guild.get_channel(conf_id)
+        if chan and chan.permissions_for(guild.me).send_messages:
+            emb = discord.Embed(title="🌸 Welcome to Unburden!", description="Klik tombol untuk **Confess** atau ketik langsung untuk **Komentar**.", color=0xff69b4)
+            await chan.send(embed=emb, view=ConfessLaunchView())
+
+    # Welcome Riddle
+    rid_id = config.get("riddle_channel_id")
+    if rid_id:
+        chan = guild.get_channel(rid_id)
+        if chan and chan.permissions_for(guild.me).send_messages:
+            emb = discord.Embed(title="🧩 Welcome to Pica Riddle!", description="Gunakan `/riddle-setup` untuk membuat tantangan.\nKlik **Jawab** pada riddle yang aktif untuk ikut serta!", color=0x2ecc71)
+            await chan.send(embed=emb)
 
 # ================= BOT CORE =================
 class PicaBot(commands.Bot):
@@ -140,26 +120,23 @@ bot = PicaBot(); tree = bot.tree
 @bot.event
 async def on_message(message):
     if message.author.bot: return
-
     config = get_server_config(message.guild.id)
-    confess_chan_id = config.get("confess_channel_id")
-
-    # AUTO-EMBED UNTUK KOMENTAR LANGSUNG
-    if message.channel.id == confess_chan_id:
+    
+    # Auto-Embed Komentar di Channel Confess
+    if message.channel.id == config.get("confess_channel_id"):
         if not message.content: return
         content = message.content
         try: await message.delete()
         except: pass
-
         emb = discord.Embed(description=content, color=discord.Color.light_gray())
         emb.set_author(name="Komentar Anonim", icon_url="https://cdn.discordapp.com/embed/avatars/0.png")
-        if message.reference:
-            emb.set_footer(text="Membalas pesan ↑")
+        if message.reference: emb.set_footer(text="Membalas pesan ↑")
         await message.channel.send(embed=emb)
-
-    # LOGIKA RIDDLE THREAD
-    elif isinstance(message.channel, discord.Thread) and message.channel.name == "Diskusi & Jawaban Riddle":
-        content, user = message.content, message.author
+        
+    # Auto-Embed Jawaban di Thread Riddle
+    elif isinstance(message.channel, discord.Thread) and "Riddle" in message.channel.name:
+        content = message.content
+        user = message.author
         try: await message.delete()
         except: pass
         emb = discord.Embed(description=content, color=discord.Color.blue())
@@ -175,7 +152,7 @@ async def sc(itx, channel: discord.TextChannel):
     config = get_server_config(itx.guild_id)
     config["confess_channel_id"] = channel.id
     save_data(server_data)
-    await itx.response.send_message(f"✅ Channel Confess diatur ke {channel.mention}", ephemeral=True)
+    await itx.response.send_message(f"✅ Channel Confess: {channel.mention}", ephemeral=True)
     await send_welcome_info(itx.guild, config)
 
 @tree.command(name="set-riddle-channel")
@@ -184,38 +161,35 @@ async def sr(itx, channel: discord.TextChannel):
     config = get_server_config(itx.guild_id)
     config["riddle_channel_id"] = channel.id
     save_data(server_data)
-    await itx.response.send_message(f"✅ Channel Riddle diatur ke {channel.mention}", ephemeral=True)
+    await itx.response.send_message(f"✅ Channel Riddle: {channel.mention}", ephemeral=True)
     await send_welcome_info(itx.guild, config)
 
-@tree.command(name="picafess", description="Kirim curhatan anonim via popup")
-async def pf(itx: discord.Interaction):
-    await itx.response.send_modal(SendConfessModal())
-
-@tree.command(name="reset-data", description="Reset counter dan settings server ini")
+@tree.command(name="reset-data")
 async def r_data(itx: discord.Interaction):
-    if not itx.user.guild_permissions.administrator: return
+    await itx.response.defer(ephemeral=True)
     sid = str(itx.guild_id)
-    if sid in server_data:
-        server_data[sid] = {"count": 0, "confess_channel_id": None, "riddle_channel_id": None}
-        save_data(server_data)
-        await itx.response.send_message("✅ Data direset. Gunakan `/set-confess-channel` lagi.", ephemeral=True)
+    server_data[sid] = {"count": 0, "confess_channel_id": None, "riddle_channel_id": None}
+    save_data(server_data)
+    await itx.followup.send("✅ Data direset!")
 
 @tree.command(name="setup-info")
 async def s_info(itx):
     if not itx.user.guild_permissions.administrator: return
-    config = get_server_config(itx.guild_id)
-    await send_welcome_info(itx.guild, config)
-    await itx.response.send_message("✅ Pesan selamat datang terkirim!", ephemeral=True)
+    await send_welcome_info(itx.guild, get_server_config(itx.guild_id))
+    await itx.response.send_message("✅ Info dikirim ke semua channel yang terdaftar!", ephemeral=True)
 
 @tree.command(name="riddle-setup")
 async def rs(itx, pertanyaan: str):
     config = get_server_config(itx.guild_id)
     chan = bot.get_channel(config.get("riddle_channel_id"))
-    if not chan: return await itx.response.send_message("❌ Set channel dulu!", ephemeral=True)
+    if not chan: return await itx.response.send_message("❌ Set channel riddle dulu!", ephemeral=True)
     embed = discord.Embed(title="🧩 PICA RIDDLE", description=f"**Pertanyaan:**\n{pertanyaan}", color=0x2ecc71)
     embed.set_author(name=f"Oleh: {itx.user.display_name}", icon_url=itx.user.display_avatar.url)
-    await chan.send(embed=embed, view=RiddleView(itx.user.id))
-    await itx.response.send_message("✅ Riddle terbit!", ephemeral=True)
+    await chan.send(embed=embed, view=RiddleView())
+    await itx.response.send_message("✅ Riddle dikirim!", ephemeral=True)
+
+@tree.command(name="picafess")
+async def pf(itx): await itx.response.send_modal(SendConfessModal())
 
 @bot.event
 async def on_ready(): print(f"Pica Online: {bot.user}")

@@ -183,7 +183,11 @@ async def rs(itx, pertanyaan: str):
     config = get_server_config(itx.guild_id)
     chan = bot.get_channel(config.get("riddle_channel_id"))
     if not chan: return await itx.response.send_message("❌ Set channel riddle dulu!", ephemeral=True)
-    embed = discord.Embed(title="🧩 PICA RIDDLE", description=f"**Pertanyaan:**\n{pertanyaan}", color=0x2ecc71)
+    
+    # PERUBAHAN DI SINI: Mengubah string \n menjadi enter sungguhan
+    pertanyaan_rapi = pertanyaan.replace("\\n", "\n")
+    
+    embed = discord.Embed(title="🧩 PICA RIDDLE", description=f"**Pertanyaan:**\n{pertanyaan_rapi}", color=0x2ecc71)
     embed.set_author(name=f"Oleh: {itx.user.display_name}", icon_url=itx.user.display_avatar.url)
     await chan.send(embed=embed, view=RiddleView())
     await itx.response.send_message("✅ Riddle dikirim!", ephemeral=True)
